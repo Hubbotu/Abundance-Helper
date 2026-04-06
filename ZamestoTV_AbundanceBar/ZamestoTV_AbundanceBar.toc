@@ -1,0 +1,17 @@
+## Interface: 120000
+## Title: Abundance Helper
+## Title-ruRU: Помощник по Изобилию
+## Notes: Abundance World Event
+## Notes-ruRU: Игровое событие Изобилие
+## Author: ZamestoTV
+## IconTexture: Interface\AddOns\ZamestoTV_AbundanceBar\Icons\goblin
+## Version: 1.07
+
+## Category-enUS: Addons ZamestoTV
+## Category-ruRU: Аддоны ZamestoTV
+
+AbundanceBar.lua
+
+
+
+
