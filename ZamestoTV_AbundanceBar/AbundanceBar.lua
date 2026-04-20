@@ -6,71 +6,103 @@ AbundanceBarDB.point = AbundanceBarDB.point or "CENTER"
 AbundanceBarDB.relPoint = AbundanceBarDB.relPoint or "CENTER"
 AbundanceBarDB.x = AbundanceBarDB.x or 0
 AbundanceBarDB.y = AbundanceBarDB.y or -220
-AbundanceBarDB.muteDundun = AbundanceBarDB.muteDundun or true
+AbundanceBarDB.muteDundun = AbundanceBarDB.muteDundun ~= false
 
--- ====================== DUNDUN BLOCK BY NAME ======================
+-- ====================== LOCALIZATION (ADDED) ======================
+local L = {}
+local locale = GetLocale()
+
+if locale == "ruRU" then
+    L.currentPattern = "текущий взнос:%s*(%d*)%s*/%s*(%d+)"
+    L.currentSearch  = "текущий взнос"
+else
+    L.currentPattern = "Current:%s*(%d*)%s*/%s*(%d+)"
+    L.currentSearch  = "Current:"
+end
+
+-- ====================== DUNDUN BLOCK (FIXED) ======================
+local restoreDialogAt = 0
 local dialogWasEnabled = nil
-local permanentMuteTicker = nil
+local ticker = nil
+local suppressTalkingHeadUntil = 0
+
+local function NormalizeText(text)
+    if type(text) ~= "string" then return "" end
+    local s = strlower(text)
+    s = gsub(s, "%s+", " ")
+    return strmatch(s, "^%s*(.-)%s*$") or ""
+end
 
 local function IsDundun(sender)
-    if not sender then return false end
-    local name = strlower(sender)
-    return name:find("^dundun") or name:find("dundun$") or 
-           name:find("dundun the") or name == "dundun"
+    local name = NormalizeText(sender)
+    return name:find("dundun", 1, true) ~= nil
+end
+
+local function StopDialogTicker()
+    if ticker then
+        ticker:Cancel()
+        ticker = nil
+    end
 end
 
 local function RestoreDialogSetting()
     if dialogWasEnabled == nil then return end
     SetCVar("Sound_EnableDialog", dialogWasEnabled and "1" or "0")
     dialogWasEnabled = nil
+    restoreDialogAt = 0
+    StopDialogTicker()
 end
 
-local function ForceMuteOn()
+local function EnsureDialogMutedFor(seconds)
+    if not AbundanceBarDB.muteDundun then return end
+
+    local now = GetTime()
+    restoreDialogAt = math.max(restoreDialogAt, now + seconds)
+
     if dialogWasEnabled == nil then
         dialogWasEnabled = GetCVar("Sound_EnableDialog") == "1"
     end
-    SetCVar("Sound_EnableDialog", "0")
-end
 
-local function StartPermanentMuteTicker()
-    if permanentMuteTicker then return end
-    permanentMuteTicker = C_Timer.NewTicker(0.3, function()
-        if AbundanceBarDB.muteDundun then
-            ForceMuteOn()
-        else
+    SetCVar("Sound_EnableDialog", "0")
+
+    if ticker then return end
+
+    ticker = C_Timer.NewTicker(0.2, function()
+        if GetTime() >= restoreDialogAt then
             RestoreDialogSetting()
         end
     end)
 end
 
-local function StopPermanentMuteTicker()
-    if permanentMuteTicker then
-        permanentMuteTicker:Cancel()
-        permanentMuteTicker = nil
-    end
-    RestoreDialogSetting()
-end
-
 local function HideTalkingHead()
-    if TalkingHeadFrame then TalkingHeadFrame:Hide() end
+    if TalkingHeadFrame then
+        TalkingHeadFrame:Hide()
+    end
 end
 
-local function SuppressTalkingHead()
+local function EnsureTalkingHeadHiddenFor(seconds)
     if not AbundanceBarDB.muteDundun then return end
+
+    suppressTalkingHeadUntil = math.max(suppressTalkingHeadUntil, GetTime() + seconds)
+
     HideTalkingHead()
     C_Timer.After(0, HideTalkingHead)
     C_Timer.After(0.1, HideTalkingHead)
     C_Timer.After(0.3, HideTalkingHead)
 end
 
+local function IsTalkingHeadSuppressed()
+    return GetTime() < suppressTalkingHeadUntil
+end
+
 -- Chat Filter
 local function FilterChat(_, _, message, sender, ...)
     if IsDundun(sender) and AbundanceBarDB.muteDundun then
-        ForceMuteOn()
-        SuppressTalkingHead()
+        EnsureDialogMutedFor(4)
+        EnsureTalkingHeadHiddenFor(4)
         return true
     end
-    return false
+    return false, message, sender, ...
 end
 
 -- ====================== MAIN FRAME ======================
@@ -134,10 +166,10 @@ local currencyText = currencyFrame:CreateFontString(nil, "ARTWORK", "GameFontHig
 currencyText:SetPoint("LEFT", currencyIcon, "RIGHT", 6, 0)
 currencyText:SetText("300 Unalloyed Abundance")
 
--- ====================== MUTE BUTTON (смещена ниже) ======================
+-- ====================== BUTTON ======================
 local muteButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 muteButton:SetSize(100, 24)
-muteButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 5)   -- смещено на 3 пикселя ниже
+muteButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 5)
 
 local function UpdateMuteButton()
     muteButton:SetText(AbundanceBarDB.muteDundun and "Muted ON" or "Muted OFF")
@@ -147,14 +179,11 @@ muteButton:SetScript("OnClick", function()
     AbundanceBarDB.muteDundun = not AbundanceBarDB.muteDundun
     UpdateMuteButton()
 
-    if AbundanceBarDB.muteDundun then
-        ForceMuteOn()
-        SuppressTalkingHead()
-        StartPermanentMuteTicker()
-        print("|cFF00FF00[AbundanceBar]|r Dundun blocked by name — ON")
-    else
-        StopPermanentMuteTicker()
+    if not AbundanceBarDB.muteDundun then
+        RestoreDialogSetting()
         print("|cFFFFAA00[AbundanceBar]|r Dundun unblocked — OFF")
+    else
+        print("|cFF00FF00[AbundanceBar]|r Dundun blocked — ON")
     end
 end)
 
@@ -202,8 +231,8 @@ local function UpdateBar()
 
     for i = 1, tooltip:NumLines() do
         local txt = _G["AbundanceTooltipTextLeft" .. i] and _G["AbundanceTooltipTextLeft" .. i]:GetText()
-        if txt and txt:find("Current:") then
-            local c, m = txt:match("Current:%s*(%d*)%s*/%s*(%d+)")
+        if txt and txt:lower():find(L.currentSearch) then
+            local c, m = txt:lower():match(L.currentPattern)
             if m then
                 current = tonumber(c) or 0
                 maxVal = tonumber(m) or 1000
@@ -215,6 +244,7 @@ local function UpdateBar()
 
     local displayMax = maxVal
     local currencyReward = 300
+
     if spellID == 1229266 then
         currencyReward = 300; displayMax = 1000
     elseif spellID == 1229501 then
@@ -229,6 +259,7 @@ local function UpdateBar()
         statusBar:SetValue(current)
         progressText:SetText(current .. " / " .. displayMax)
         statusBar:SetStatusBarColor(0.0, 0.65, 1.0)
+
         if current >= displayMax * 0.98 then
             progressText:SetTextColor(0, 1, 0)
         else
@@ -246,14 +277,9 @@ local function UpdateBar()
     currencyText:SetText(currencyReward .. " Unalloyed Abundance")
 
     frame:Show()
-
-    if AbundanceBarDB.muteDundun then
-        ForceMuteOn()
-        SuppressTalkingHead()
-    end
 end
 
--- Events, Filters, Dragging, Slash
+-- ====================== EVENTS ======================
 frame:RegisterEvent("UNIT_AURA")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("PLAYER_LOGIN")
@@ -264,15 +290,13 @@ frame:RegisterEvent("CHAT_MSG_MONSTER_SAY")
 frame:RegisterEvent("CHAT_MSG_MONSTER_YELL")
 frame:RegisterEvent("CHAT_MSG_MONSTER_EMOTE")
 frame:RegisterEvent("CHAT_MSG_RAID_BOSS_EMOTE")
+frame:RegisterEvent("PLAYER_LOGOUT")
 
 frame:SetScript("OnEvent", function(_, event, unit, ...)
     if event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_LOGIN" then
         frame:ClearAllPoints()
         frame:SetPoint(AbundanceBarDB.point, UIParent, AbundanceBarDB.relPoint, AbundanceBarDB.x, AbundanceBarDB.y)
         C_Timer.After(0.5, UpdateBar)
-        C_Timer.After(1, function()
-            if AbundanceBarDB.muteDundun then StartPermanentMuteTicker() end
-        end)
 
     elseif event == "PLAYER_REGEN_ENABLED" or event == "CURRENCY_DISPLAY_UPDATE" then
         C_Timer.After(0.2, UpdateBar)
@@ -281,22 +305,32 @@ frame:SetScript("OnEvent", function(_, event, unit, ...)
         UpdateBar()
 
     elseif event == "TALKINGHEAD_REQUESTED" then
-        SuppressTalkingHead()
+        if IsTalkingHeadSuppressed() then
+            C_Timer.After(0, HideTalkingHead)
+            C_Timer.After(0.1, HideTalkingHead)
+            C_Timer.After(0.3, HideTalkingHead)
+        end
 
     elseif (event == "CHAT_MSG_MONSTER_SAY" or event == "CHAT_MSG_MONSTER_YELL" or 
             event == "CHAT_MSG_MONSTER_EMOTE" or event == "CHAT_MSG_RAID_BOSS_EMOTE") then
+
         local message, sender = ...
         if IsDundun(sender) and AbundanceBarDB.muteDundun then
-            ForceMuteOn()
-            SuppressTalkingHead()
+            EnsureDialogMutedFor(4)
+            EnsureTalkingHeadHiddenFor(4)
         end
+
+    elseif event == "PLAYER_LOGOUT" then
+        RestoreDialogSetting()
     end
 end)
 
+-- Filters
 ChatFrame_AddMessageEventFilter("CHAT_MSG_MONSTER_SAY", FilterChat)
 ChatFrame_AddMessageEventFilter("CHAT_MSG_MONSTER_YELL", FilterChat)
 ChatFrame_AddMessageEventFilter("CHAT_MSG_MONSTER_EMOTE", FilterChat)
 
+-- Drag
 frame:SetScript("OnDragStart", frame.StartMoving)
 frame:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
@@ -307,6 +341,7 @@ frame:SetScript("OnDragStop", function(self)
     AbundanceBarDB.y = y
 end)
 
+-- Slash
 SLASH_ABUNDANCE1 = "/abbar"
 SlashCmdList["ABUNDANCE"] = function(msg)
     if msg == "reset" then
@@ -320,12 +355,6 @@ SlashCmdList["ABUNDANCE"] = function(msg)
     end
 end
 
--- Initialize
-print("|cFF00FF00[AbundanceBar]|r Addon loaded (v3.0 Fixed)")
+-- Init
+print("|cFF00FF00[AbundanceBar]|r Addon loaded (v3.1 FIXED Dundun)")
 UpdateMuteButton()
-
-C_Timer.After(2, function()
-    if AbundanceBarDB.muteDundun then
-        StartPermanentMuteTicker()
-    end
-end)
