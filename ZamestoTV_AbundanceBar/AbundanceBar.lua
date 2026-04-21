@@ -229,10 +229,24 @@ local function UpdateBar()
     local maxVal = 1000
     local found = false
 
-    for i = 1, tooltip:NumLines() do
-        local txt = _G["AbundanceTooltipTextLeft" .. i] and _G["AbundanceTooltipTextLeft" .. i]:GetText()
-        if txt and txt:lower():find(L.currentSearch) then
-            local c, m = txt:lower():match(L.currentPattern)
+for i = 1, tooltip:NumLines() do
+    local txt = _G["AbundanceTooltipTextLeft" .. i] and _G["AbundanceTooltipTextLeft" .. i]:GetText()
+
+    if txt then
+        -- ================= ENGLISH =================
+        if txt:find("Current:") then
+            local c, m = txt:match("Current:%s*(%d*)%s*/%s*(%d+)")
+            if m then
+                current = tonumber(c) or 0
+                maxVal = tonumber(m) or 1000
+                found = true
+            end
+            break
+        end
+
+        -- ================= RUSSIAN =================
+        if txt:find("текущий взнос") or txt:find("Текущий взнос") then
+            local c, m = txt:match("[Тт]екущий взнос:%s*(%d*)%s*/%s*(%d+)")
             if m then
                 current = tonumber(c) or 0
                 maxVal = tonumber(m) or 1000
@@ -241,6 +255,7 @@ local function UpdateBar()
             break
         end
     end
+end
 
     local displayMax = maxVal
     local currencyReward = 300
